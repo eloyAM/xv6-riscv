@@ -95,3 +95,17 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_settickets(void)
+{
+  int n;
+  // Recuperar el argumento de la función y guardarlo en la variable
+  if(argint(0, &n) < 0)
+    return -1;
+  // Comprobar que sea un número válido
+  if (n < 1)
+    return -2;
+
+  return 0;
+}
