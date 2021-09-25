@@ -6,6 +6,9 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "pstat.h"
+
+extern struct proc proc[NPROC];
 
 uint64
 sys_exit(void)
@@ -113,7 +116,24 @@ sys_settickets(void)
 uint64
 sys_getpinfo(void)
 {
- // TODO: getpinfo implementation
+  uint64 dstva; // User-space pointer to struct pstat
+  if (argaddr(0, &dstva) < 0) // Retrieve the function argument
+    return -1;
+
+  struct pstat pi = {0};  // Local proc-info table
+
+  struct proc *p; int i;  // Iterators
+  for (p = proc, i = 0; p < &proc[NPROC]; p++, i++)
+  {
+    pi.inuse  [i] = (p->state == UNUSED)? 0 : 1;
+    pi.pid    [i] = p->pid;
+    pi.tickets[i] = p->tickets;
+    pi.ticks  [i] = -69;                           // TODO: Add field ticks to proc
+  }
+
+  // Copy the struct into user space
+  if(copyout(myproc()->pagetable, dstva, (char*)&pi, sizeof(struct pstat)) < 0)
+    return -1;
 
  return 0;
 }
