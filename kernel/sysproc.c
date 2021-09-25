@@ -109,3 +109,11 @@ sys_settickets(void)
 
   return 0;
 }
+
+uint64
+sys_getpinfo(void)
+{
+ // TODO: getpinfo implementation
+
+ return 0;
+}
