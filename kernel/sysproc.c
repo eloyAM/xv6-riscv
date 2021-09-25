@@ -109,6 +109,8 @@ sys_settickets(void)
   // Comprobar que sea un número válido
   if (n < 1)
     return -2;
+  // Cambiar el número de tickets
+  myproc()->tickets = n;
 
   return 0;
 }

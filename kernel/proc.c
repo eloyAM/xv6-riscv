@@ -244,6 +244,8 @@ userinit(void)
 
   p->state = RUNNABLE;
 
+  p->tickets = 1;
+
   release(&p->lock);
 }
 
@@ -288,6 +290,8 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
+
+  np->tickets = p->tickets; // Same no. tickets as the parent
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
