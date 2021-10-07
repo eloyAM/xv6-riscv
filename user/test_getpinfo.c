@@ -13,7 +13,7 @@ main(int argc, char *argv[])
   
   for (int i = 0; i < NPROC; i++) {
     if(pi.inuse[i] != 0) {
-      printf("PID:%d\t TICKETS:%d\t TICKS:%d\t INUSE:%d\n", pi.pid[i], pi.tickets[i], pi.ticks[i], pi.inuse[i]);
+      printf("PID:%d\t TICKETS:%d\t TICKS:%d\t WINS:%d\t INUSE:%d\n", pi.pid[i], pi.tickets[i], pi.ticks[i], pi.sched_times[i], pi.inuse[i]);
     }
   }
 

@@ -292,6 +292,10 @@ fork(void)
   np->sz = p->sz;
 
   np->tickets = p->tickets; // Same no. tickets as the parent
+  // Not executed yet: scheduling stats to 0
+  np->prev_ticks = 0;
+  np->ticks = 0;
+  np->sched_times = 0;
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
@@ -443,25 +447,59 @@ scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
+  int total_tickets, winning_ticket;
+  unsigned long seed;
   
   c->proc = 0;
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
 
+    // Get the total number of tickets
+    total_tickets = 0;
+    for(p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if(p->state == RUNNABLE)
+        total_tickets += p->tickets;
+      release(&p->lock);
+    }
+    // Choose lottery winner
+    acquire(&tickslock);
+    seed = ticks;
+    release(&tickslock);
+    // Based on Linux man-pages example implementation of rand()
+    seed = seed * 1103515245 + 12345;
+    winning_ticket = (unsigned)(seed/65536) % total_tickets;
+    total_tickets = 0;
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+        // Find out the winner process
+        total_tickets += p->tickets;
+        if(total_tickets >= winning_ticket) {
+          // Switch to chosen process.  It is the process's job
+          // to release its lock and then reacquire it
+          // before jumping back to us.
+          p->state = RUNNING;
+          c->proc = p;
+          p->sched_times++;
+          // Update the total proc ticks
+          if(p->prev_ticks != 0) {
+            acquire(&tickslock);
+            p->ticks += ticks - p->prev_ticks; // Accumulate ticks
+            p->prev_ticks = ticks;
+            release(&tickslock);
+          } else {
+            acquire(&tickslock);
+            p->prev_ticks = ticks;              // Save the first proc execution timestamp
+            release(&tickslock);
+          }
+          swtch(&c->context, &p->context);
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
+          // Process is done running for now.
+          // It should have changed its p->state before coming back.
+          c->proc = 0;
+        }
       }
       release(&p->lock);
     }
@@ -654,7 +692,7 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    printf("%d %s %s", p->pid, state, p->name);
+    printf("%d %s %s %d %d %d", p->pid, state, p->name, p->tickets, p->ticks, p->sched_times);
     printf("\n");
   }
 }

@@ -35,6 +35,7 @@ static void printpinfo(int pid)
       printf("Number of tickets that PID %d has: %d\n", pid, pi.tickets[i]);
       printf("Number of ticks that PID %d has: %d\n", pid, pi.ticks[i]);
       printf("Is the process with PID %d in use? (0 or 1): %d\n", pid, pi.inuse[i]);
+      printf("Number of lottery wins that process with PID %d has: %d\n", pid, pi.sched_times[i]);
     }
   }
 }

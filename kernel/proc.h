@@ -93,6 +93,9 @@ struct proc {
   int xstate;                  // Exit status to be returned to parent's wait
   int pid;                     // Process ID
   int tickets;                 // Lottery scheduler
+  uint ticks;                  // Total ticks (execution time consumed)
+  uint prev_ticks;             // Previous timeslice ending
+  int sched_times;             // Times choosed as winner process to execute
 
   // wait_lock must be held when using this:
   struct proc *parent;         // Parent process

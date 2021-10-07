@@ -130,7 +130,8 @@ sys_getpinfo(void)
     pi.inuse  [i] = (p->state == UNUSED)? 0 : 1;
     pi.pid    [i] = p->pid;
     pi.tickets[i] = p->tickets;
-    pi.ticks  [i] = -69;                           // TODO: Add field ticks to proc
+    pi.ticks  [i] = p->ticks;
+    pi.sched_times[i] = p->sched_times;
   }
 
   // Copy the struct into user space
