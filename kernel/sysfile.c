@@ -484,3 +484,17 @@ sys_pipe(void)
   }
   return 0;
 }
+
+uint64
+sys_mmap(void)
+{
+  // TODO mmap implementation
+  return 0;
+}
+
+uint64
+sys_munmap(void)
+{
+  // TODO munmap implementation
+  return 0;
+}
