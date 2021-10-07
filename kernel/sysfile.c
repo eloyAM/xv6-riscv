@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "mmap.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -489,12 +490,12 @@ uint64
 sys_mmap(void)
 {
   // TODO mmap implementation
-  return 0;
+  return MAP_ERROR;
 }
 
 uint64
 sys_munmap(void)
 {
   // TODO munmap implementation
-  return 0;
+  return -1;
 }
