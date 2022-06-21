@@ -82,6 +82,22 @@ struct trapframe {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+#define MAPPING_MAX 16
+#define MMAP_START (1L << 37)
+// 2 ^ 20 -> 1G
+#define MMAP_SIZE (1L << 20)
+#define MMAP_END (MMAP_START + MAPPING_MAX * MMAP_SIZE)
+
+struct mmaping {
+  uint64 start, end;
+  size_t len;
+  int prot;
+  int flags;
+  off_t offset;
+  int used;
+  struct file *file;
+};
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -105,4 +121,5 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct mmaping mmaping[MAPPING_MAX];      // Memory mappings
 };

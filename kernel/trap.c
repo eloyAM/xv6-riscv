@@ -5,6 +5,8 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "mmap.h"
+#include "file.h"
 
 struct spinlock tickslock;
 uint ticks;
@@ -65,6 +67,62 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if(r_scause() == 13 || r_scause() == 15){
+    // usertrap page fault. 13 for load, 15 for store
+    uint64 fault_vaddr = r_stval();
+    if (fault_vaddr >= MMAP_START && fault_vaddr < MMAP_END)
+    {
+      pagetable_t pagetable = p->pagetable;
+      uint64 vpage_base = PGROUNDDOWN(fault_vaddr);
+      int map_sel = (vpage_base - MMAP_START) / MMAP_SIZE;
+      struct mmaping *map = &p->mmaping[map_sel];
+      uint64 map_start = map->start;
+
+      // check for invalid mapping & access
+      if (!map->used || fault_vaddr >= map->end)
+      {
+        printf("usertrap(): page fault in pid=%d\n", p->pid);
+        printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+        p->killed = 1;
+        goto end;
+      }
+
+      uint64 file_start = vpage_base - map_start;
+      uint64 read_len = PGSIZE;
+      if (read_len > map->len - file_start)
+        read_len = map->len - file_start;
+
+      struct file *f = map->file;
+      int prot = ((map->prot & PROT_READ) ? PTE_R : 0)
+                | ((map->prot & PROT_WRITE) ? PTE_W : 0);
+
+      char *mem = kalloc();
+      if (mem == 0)
+      {
+        printf("usertrap(): segfault: no more physical pages available, killing process\n");
+        p->killed = 1;
+        goto end;
+      }
+
+      memset(mem, 0, PGSIZE);
+      ilock(f->ip);
+      readi(f->ip, 0, (uint64)mem, file_start, read_len);
+      iunlock(f->ip);
+
+      if (mappages(pagetable, vpage_base, PGSIZE, (uint64)mem, prot | PTE_U) != 0)
+      {
+        printf("usertrap(): segfault: cannot map a page");
+        kfree(mem);
+        p->killed = 1;
+        goto end;
+      }
+    }
+    else
+    {
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
@@ -72,7 +130,7 @@ usertrap(void)
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
-
+end:
   if(p->killed)
     exit(-1);
 
@@ -142,8 +200,11 @@ kerneltrap()
     panic("kerneltrap: not from supervisor mode");
   if(intr_get() != 0)
     panic("kerneltrap: interrupts enabled");
-
-  if((which_dev = devintr()) == 0){
+  if(scause == 13 || scause == 15){
+    // TODO kerneltrap page fault
+    printf("kerneltrap(): page fault\n");
+    printf("sepc=%p stval=%p\n", sepc, r_stval());
+  } else if((which_dev = devintr()) == 0){
     printf("scause %p\n", scause);
     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
     panic("kerneltrap");

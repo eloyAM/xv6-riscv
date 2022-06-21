@@ -486,16 +486,108 @@ sys_pipe(void)
   return 0;
 }
 
+// mmap(void* addr, size_t len, int prot, int flags, int fd, off_t offset)
 uint64
 sys_mmap(void)
 {
-  // TODO mmap implementation
-  return MAP_ERROR;
+  struct proc *p = myproc();
+  // INPUT PARAMETERS SECTION
+  void *addr;
+  size_t len;
+  int prot, flags;
+  // The input arg is 'int fd' but we'll get directly the struct file with argfd()
+  struct file *f;
+  off_t offset;
+  // Retrieve input params
+  if (argaddr(0, &addr) < 0 || argint(1, &len) < 0 || argint(2, &prot) < 0 || argint(3, &flags) < 0 || argfd(4, 0, &f) < 0 || argint(5, &offset) < 0)
+    return -1;
+  // Check input params
+  // addr must be 0 (void) so the starting address can't be chosen by the user
+  // no offset neither (only map from the beggining)
+  if (addr != 0 || offset != 0)
+    return -1;
+
+  // Search a mmaping slot
+  int i = 0;
+  while (i < MAPPING_MAX && p->mmaping[i].used)
+    i++;
+  if (i >= MAPPING_MAX)
+    return -1;
+  // Save the mapping info in the proc
+  // The addr will depend on the available slot and a fixed base and size
+  p->mmaping[i].start = MMAP_START + i * MMAP_SIZE; // TODO use PGROUNDUP() ?
+  p->mmaping[i].end = PGROUNDDOWN(p->mmaping[i].start + len);
+  p->mmaping[i].len = len;
+  p->mmaping[i].prot = prot;
+  p->mmaping[i].flags = flags;
+  p->mmaping[i].offset = offset;
+  p->mmaping[i].used = 1;
+  p->mmaping[i].file = f;
+  // Return the start address of the mapping
+  return p->mmaping[i].start;
 }
 
+// munmap(void* addr, size_t len)
 uint64
 sys_munmap(void)
 {
   // TODO munmap implementation
-  return -1;
+  struct proc *p = myproc();
+  // INPUT PARAMETERS SECTION
+  uint64 addr;
+  size_t len;
+  // Retrieve input params
+  if (argaddr(0, &addr) < 0 || argint(1, &len) < 0)
+    return -1;
+  // Check input params
+  if (addr < MMAP_START || addr > MMAP_END)
+    return -1;
+
+  // Search the mapping slot
+  uint64 vpage_base = PGROUNDDOWN(addr);
+  int i = (vpage_base - MMAP_START) / MMAP_SIZE;
+  struct mmaping *map = &p->mmaping[i];
+  if (!map->used)
+    return -1;
+
+  static pte_t *pte;
+  uint64 pa;
+  for (uint64 va = vpage_base; va < addr + len; va += PGSIZE)
+  {
+    if ((pte = walk(p->pagetable, va, 0)) && (*pte & PTE_V))
+    {
+      // Check dirty page
+      if ((map->flags & MAP_SHARED) && (*pte & PTE_D))
+      {
+        uint64 write_start = va - vpage_base;
+        uint64 write_len = PGSIZE;
+        if (write_len > map->len - write_start)
+          write_len = map->len - write_start;
+        struct file *f = map->file;
+
+        begin_op();
+        ilock(f->ip);
+        writei(f->ip, 0, pa, write_start, write_len);
+        iunlock(f->ip);
+        end_op();
+      }
+      uvmunmap(p->pagetable, va, PGSIZE, 0);
+      kderef((void *)pa);
+    }
+  }
+
+  if (map->start == addr && map->len == len)
+  {
+    fileclose(map->file);
+    map->used = 0;
+  }
+  else
+  {
+    if (map->start == addr)
+      map->start = addr + len;
+    if (map->end == addr + len)
+      map->end = addr;
+  }
+
+  return 0;
 }

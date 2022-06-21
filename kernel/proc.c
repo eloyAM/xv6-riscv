@@ -299,6 +299,14 @@ fork(void)
   for(i = 0; i < NOFILE; i++)
     if(p->ofile[i])
       np->ofile[i] = filedup(p->ofile[i]);
+
+  // duplicate mmapings
+  for(i = 0; i < MAPPING_MAX; i++)
+    if(p->mmaping[i].used) {
+      np->mmaping[i] = p->mmaping[i];
+      mmap_dup(np->pagetable, np->mmaping);
+    }
+
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
@@ -350,6 +358,15 @@ exit(int status)
       struct file *f = p->ofile[fd];
       fileclose(f);
       p->ofile[fd] = 0;
+    }
+  }
+
+  // Clean mmapings
+  for(int i = 0; i < MAPPING_MAX; i++){
+    if(p->ofile[i]){
+      struct mmaping *mapping = &p->mmaping[i];
+      mapping->used = 0;
+      mmap_dedup(p->pagetable, mapping);
     }
   }
 
@@ -653,4 +670,29 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+void mmap_dup(pagetable_t pagetable, struct mmaping *map)
+{
+  static pte_t *pte;
+  uint64 pa;
+  for (uint64 va = map->start; va < map->end; va += PGSIZE)
+    if ((pte = walk(pagetable, va, 0)) && (*pte & PTE_V))
+    {
+      pa = PTE2PA(*pte);
+      kref((void *)pa);
+    }
+}
+
+void mmap_dedup(pagetable_t pagetable, struct mmaping *map)
+{
+  static pte_t *pte;
+  uint64 pa;
+  for (uint64 va = map->start; va < map->end; va += PGSIZE)
+    if ((pte = walk(pagetable, va, 0)) && (*pte & PTE_V))
+    {
+      pa = PTE2PA(*pte);
+      uvmunmap(pagetable, va, PGSIZE, 0);
+      kderef((void *)pa);
+    }
 }
