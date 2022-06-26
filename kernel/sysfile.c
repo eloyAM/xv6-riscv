@@ -16,6 +16,7 @@
 #include "file.h"
 #include "fcntl.h"
 #include "mmap.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -486,13 +487,67 @@ sys_pipe(void)
   return 0;
 }
 
+// void *mmap(void *addr, int len, int prot, int flags, int fd, int offset)
 uint64
 sys_mmap(void)
 {
-  // TODO mmap implementation
-  return MAP_ERROR;
+  struct proc *p = myproc();
+  // INPUT PARAMETERS SECTION
+  uint64 addr;
+  int len, prot, flags, offset;
+  // The input arg is 'int fd' but we'll get directly the struct file with argfd()
+  struct file *f;
+  // Retrieve input params
+  if (argaddr(0, &addr) < 0 || argint(1, &len) < 0 || argint(2, &prot) < 0 || argint(3, &flags) < 0 || argfd(4, 0, &f) < 0 || argint(5, &offset) < 0)
+    return MAP_ERROR;
+  // Check input params
+  // addr must be 0 (void*) so the starting address can't be chosen by the user
+  // no offset neither (only map from the beggining)
+  if (addr != 0 || offset != 0)
+    return MAP_ERROR;
+
+  // Search an available (unused) mapping slot
+  struct mmapping *map = 0x0;
+  for (int i = 0; i < NMMAPS; i++)
+  {
+    if (!p->mmapings[i].used)
+    {
+      map = &p->mmapings[i];
+      break;
+    }
+  }
+  if (!map)
+    return MAP_ERROR; // Already reached the no. maps limit
+
+  // Calculate a suitable address to start the mapping
+  // Starts at the end of the used mapping slot with greatest end addr
+  uint64 maxend = VMA_BASE;
+  for (int i = 0; i < NMMAPS; i++)
+  {
+    struct mmapping *m = &p->mmapings[i];
+    if (m->used && m->end > maxend)
+      maxend = m->end;
+  }
+
+  // Save the mapping info
+  // No allocation is done yet, but when the page fault occurs
+  map->used = 1;
+  map->start = maxend;
+  map->end = PGROUNDUP(map->start + len);
+  map->len = map->end - map->start;
+  map->file = f;
+  map->offset = offset;
+  map->prot = prot;
+  map->flags = flags;
+
+  // Increment the no. refs to the file
+  filedup(f);
+
+  // Return the start of the mapping
+  return map->start;
 }
 
+// int munmap(void *, int len)
 uint64
 sys_munmap(void)
 {

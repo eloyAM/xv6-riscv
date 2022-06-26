@@ -5,6 +5,11 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "sleeplock.h"
+#include "proc.h"
+#include "mmap.h"
+#include "file.h"
 
 /*
  * the kernel's page table.
@@ -431,4 +436,55 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+// Actual allocation of pages for mmap
+// when a page fault occurs
+int mmap_pgfault(uint64 stval, struct proc *p)
+{
+  stval = PGROUNDDOWN(stval);
+
+  struct mmapping *map = 0x0;
+  // Find the mapping that caused the page fault
+  for (int i = 0; i < NMMAPS; i++)
+  {
+    struct mmapping *m = &p->mmapings[i];
+    if (m->used && stval >= m->start && stval < m->end)
+    {
+      map = &p->mmapings[i];
+      break;
+    }
+  }
+  if (!map)
+    return -1;
+
+  char *pa = kalloc();
+  if (pa == 0)
+    return -1;
+  memset(pa, 0, PGSIZE); // Clean the page before use it
+
+  // Check the permissions
+  int prot = PTE_U;
+  if (map->prot & PROT_READ)
+    prot |= PTE_R;
+  if (map->prot & PROT_WRITE)
+    prot |= PTE_W;
+
+  // Do the the mapping
+  if (mappages(p->pagetable, PGROUNDDOWN(stval), PGSIZE, (uint64)pa, prot) != 0)
+    return -1;
+
+  // Read the content of the file through the i-node
+  // to copy the data into the memory mapping area
+  uint64 off = stval - map->start + map->offset;
+  struct file *f = map->file;
+  ilock(f->ip);
+  if (readi(f->ip, 0, (uint64)pa, off, PGSIZE) <= 0)
+  {
+    iunlock(f->ip);
+    return -1;
+  }
+  iunlock(f->ip);
+
+  return 0;
 }
