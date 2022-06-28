@@ -442,21 +442,11 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 // when a page fault occurs
 int mmap_pgfault(uint64 stval, struct proc *p)
 {
-  stval = PGROUNDDOWN(stval);
+  uint64 vpage_base = PGROUNDDOWN(stval);
 
-  struct mmapping *map = 0x0;
   // Find the mapping that caused the page fault
-  for (int i = 0; i < NMMAPS; i++)
-  {
-    struct mmapping *m = &p->mmapings[i];
-    if (m->used && stval >= m->start && stval < m->end)
-    {
-      map = &p->mmapings[i];
-      break;
-    }
-  }
-  if (!map)
-    return -1;
+  int i_map = (vpage_base - MMAP_START) / MMAP_SIZE;
+  struct mmapping *map = &p->mmapings[i_map];
 
   char *pa = kalloc();
   if (pa == 0)
@@ -471,15 +461,18 @@ int mmap_pgfault(uint64 stval, struct proc *p)
     prot |= PTE_W;
 
   // Do the the mapping
-  if (mappages(p->pagetable, PGROUNDDOWN(stval), PGSIZE, (uint64)pa, prot) != 0)
+  if (mappages(p->pagetable, vpage_base, PGSIZE, (uint64)pa, prot) != 0)
     return -1;
 
   // Read the content of the file through the i-node
   // to copy the data into the memory mapping area
-  uint64 off = stval - map->start + map->offset;
+  uint64 file_start = vpage_base - map->start;
+  uint64 read_len = PGSIZE;
+  if (read_len > map->len - file_start)
+    read_len = map->len - file_start;
   struct file *f = map->file;
   ilock(f->ip);
-  if (readi(f->ip, 0, (uint64)pa, off, PGSIZE) <= 0)
+  if (readi(f->ip, 0, (uint64)pa, file_start, read_len) <= 0)
   {
     iunlock(f->ip);
     return -1;

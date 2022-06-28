@@ -66,5 +66,8 @@
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
 
-// Start from 4GB
-#define VMA_BASE 0x100000000
+// MAXVA is 1L << 38 (check riscv.h)
+#define MMAP_START (1L << 37)
+// 2 ^ 20 -> 1Mb
+#define MMAP_SIZE (1L << 20)
+#define MMAP_END (MMAP_START + NMMAPS * MMAP_SIZE)
