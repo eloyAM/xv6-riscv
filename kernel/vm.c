@@ -481,3 +481,114 @@ int mmap_pgfault(uint64 stval, struct proc *p)
 
   return 0;
 }
+
+int mmap_exists(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte = walk(pagetable, va, 0);
+  return (pte != 0x0) && (*pte & PTE_V);
+}
+
+int munmap_writeback(uint64 unstart, uint64 unlen, uint64 start, uint64 offset, struct mmapping *map)
+{
+  struct file *f = map->file;
+  const uint64 off = unstart - start + offset;
+
+  ilock(f->ip);
+  const uint size = f->ip->size;
+  iunlock(f->ip);
+  if (off >= size)
+    return -1;
+
+  const uint n = (unlen < size - off) ? (unlen) : (size - off);
+
+  const int max = ((MAXOPBLOCKS - 1 - 1 - 2) / 2) * BSIZE;
+  int i = 0;
+  while (i < n)
+  {
+    const int to_write = (n - i < max) ? (n - i) : (max);
+
+    begin_op();
+    ilock(f->ip);
+    const int written = writei(f->ip, 1, unstart, off + i, to_write);
+    iunlock(f->ip);
+    end_op();
+
+    if (written != to_write)
+      break;
+
+    i += written;
+  }
+  if (i == n)
+    return n;
+  return -1;
+}
+
+int munmap_impl(uint64 addr, int len)
+{
+  struct proc *p = myproc();
+  uint64 vpage_base = PGROUNDDOWN(addr);
+
+  // Find the refered mapping
+  int i_map = (vpage_base - MMAP_START) / MMAP_SIZE;
+  struct mmapping *map = &p->mmapings[i_map];
+  if (!map)
+    return -1;
+
+  // The unmap must be done from a point and with a length not causing holes in between. That means:
+  // - from the beggining: full or partial length
+  // - from any point: the lenght covers until the end
+  uint64 unstart, unlen;
+  const uint64 orig_start = map->start, orig_off = map->offset, orig_len = map->len;
+  // Calculate the unmapping start and len
+  // Update the mapping info according to that
+  if (vpage_base == map->start)
+  {
+    // From the beggining
+    unstart = vpage_base;
+    unlen = PGROUNDDOWN(len);
+    if (unlen >= map->len)
+      unlen = map->len;
+
+    map->start = unstart + unlen;
+    map->len -= unlen;
+    map->offset += unlen;
+  }
+  else if (vpage_base + len >= map->end)
+  {
+    // At the end
+    unstart = vpage_base;
+    unlen = map->end - unstart;
+
+    map->end = unstart;
+    map->len = map->end - map->start;
+  }
+  else
+  {
+    // Whole region
+    unstart = map->start;
+    unlen = map->end - map->start;
+  }
+
+  for (int i = 0; i < unlen / PGSIZE; i++)
+  {
+    uint64 va = unstart + i * PGSIZE;
+    // Check first if the area was allocated (due to lazy allocation, it might not be)
+    // Write back to reflect the changes if the mapping was shared
+    if (mmap_exists(p->pagetable, va))
+    {
+      if (map->flags & MAP_SHARED)
+        if (munmap_writeback(va, PGSIZE, orig_start, orig_off, map) < 0)
+          return -1;
+      uvmunmap(p->pagetable, va, 1, 1);
+    }
+  }
+
+  // Decrement file ref if unmapped completely
+  if (unlen == orig_len)
+  {
+    fileclose(map->file);
+    map->used = 0;
+  }
+
+  return 0;
+}

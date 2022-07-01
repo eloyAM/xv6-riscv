@@ -547,6 +547,13 @@ sys_mmap(void)
 uint64
 sys_munmap(void)
 {
-  // TODO munmap implementation. Currently returns ok code to pass the mmap tests.
+  uint64 addr;
+  int len;
+
+  if (argaddr(0, &addr) < 0 || argint(1, &len) < 0)
+    return -1;
+
+  return munmap_impl(addr, len);
+
   return 0;
 }
