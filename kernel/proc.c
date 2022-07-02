@@ -267,6 +267,19 @@ growproc(int n)
   return 0;
 }
 
+// Copy the used mappings from the father process when forking
+void fork_mmap(struct proc *np, struct proc *p)
+{
+  for (int i = 0; i < NMMAPS; i++)
+  {
+    if (p->mmapings[i].used)
+    {
+      np->mmapings[i] = p->mmapings[i];
+      filedup(np->mmapings[i].file);
+    }
+  }
+}
+
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
 int
@@ -303,6 +316,8 @@ fork(void)
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
+  fork_mmap(np, p);
+
   pid = np->pid;
 
   release(&np->lock);
@@ -333,6 +348,19 @@ reparent(struct proc *p)
   }
 }
 
+// Unmap the used mappings when the process is exiting
+void exit_mmap(struct proc *p)
+{
+  for (int i = 0; i < NMMAPS; i++)
+  {
+    if (p->mmapings[i].used)
+    {
+      munmap_impl(p->mmapings[i].start, p->mmapings[i].len);
+      p->mmapings[i].used = 0;
+    }
+  }
+}
+
 // Exit the current process.  Does not return.
 // An exited process remains in the zombie state
 // until its parent calls wait().
@@ -352,6 +380,8 @@ exit(int status)
       p->ofile[fd] = 0;
     }
   }
+
+  exit_mmap(p);
 
   begin_op();
   iput(p->cwd);
