@@ -26,6 +26,45 @@ extern char trampoline[]; // trampoline.S
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
 
+
+// TODO remove
+/*
+*/
+// Return a integer between 0 and ((2^32 - 1) / 2), which is 2147483647.
+uint
+random(void)
+{
+  // Take from http://stackoverflow.com/questions/1167253/implementation-of-rand
+  static unsigned int z1 = 12345, z2 = 12345, z3 = 12345, z4 = 12345;
+  unsigned int b;
+  b  = ((z1 << 6) ^ z1) >> 13;
+  z1 = ((z1 & 4294967294U) << 18) ^ b;
+  b  = ((z2 << 2) ^ z2) >> 27; 
+  z2 = ((z2 & 4294967288U) << 2) ^ b;
+  b  = ((z3 << 13) ^ z3) >> 21;
+  z3 = ((z3 & 4294967280U) << 7) ^ b;
+  b  = ((z4 << 3) ^ z4) >> 12;
+  z4 = ((z4 & 4294967168U) << 13) ^ b;
+
+  return (z1 ^ z2 ^ z3 ^ z4) / 2;
+}
+
+// Return a random integer between a given range.
+int
+randomrange(int lo, int hi)
+{
+  if (hi < lo) {
+    int tmp = lo;
+    lo = hi;
+    hi = tmp;
+  }
+  int range = hi - lo + 1;
+  return random() % (range) + lo;
+}
+/*
+*/
+
+
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
@@ -164,6 +203,10 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->ticks = 0;
+  p->prev_ticks = 0;
+  p->sched_times = 0;
+  p->tickets = 0;
 }
 
 // Create a user page table for a given process,
@@ -245,6 +288,9 @@ userinit(void)
   p->state = RUNNABLE;
 
   p->tickets = 1;
+  p->ticks = 0;
+  p->prev_ticks = 0;
+  p->sched_times = 0;
 
   release(&p->lock);
 }
@@ -448,7 +494,6 @@ scheduler(void)
   struct proc *p;
   struct cpu *c = mycpu();
   int total_tickets, winning_ticket;
-  unsigned long seed;
   
   c->proc = 0;
   for(;;){
@@ -464,19 +509,13 @@ scheduler(void)
       release(&p->lock);
     }
     // Choose lottery winner
-    acquire(&tickslock);
-    seed = ticks;
-    release(&tickslock);
-    // Based on Linux man-pages example implementation of rand()
-    seed = seed * 1103515245 + 12345;
-    winning_ticket = (unsigned)(seed/65536) % total_tickets;
-    total_tickets = 0;
+    winning_ticket = randomrange(1, total_tickets);
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
         // Find out the winner process
-        total_tickets += p->tickets;
-        if(total_tickets >= winning_ticket) {
+        winning_ticket -= p->tickets;
+        if(winning_ticket <= 0) {
           // Switch to chosen process.  It is the process's job
           // to release its lock and then reacquire it
           // before jumping back to us.
@@ -484,18 +523,23 @@ scheduler(void)
           c->proc = p;
           p->sched_times++;
           // Update the total proc ticks
-          if(p->prev_ticks != 0) {
-            acquire(&tickslock);
-            p->ticks += ticks - p->prev_ticks; // Accumulate ticks
-            p->prev_ticks = ticks;
-            release(&tickslock);
-          } else {
-            acquire(&tickslock);
-            p->prev_ticks = ticks;              // Save the first proc execution timestamp
-            release(&tickslock);
-          }
+          acquire(&tickslock);
+          p->prev_ticks = ticks;
+          release(&tickslock);
+          // if(p->prev_ticks != 0) {
+          //   acquire(&tickslock);
+          //   p->ticks += ticks - p->prev_ticks; // Accumulate ticks
+          //   p->prev_ticks = ticks;
+          //   release(&tickslock);
+          // } else {
+          //   acquire(&tickslock);
+          //   p->prev_ticks = ticks;              // Save the first proc execution timestamp
+          //   release(&tickslock);
+          // }
           swtch(&c->context, &p->context);
-
+          acquire(&tickslock);
+          p->ticks += ticks - p->prev_ticks;
+          release(&tickslock);
           // Process is done running for now.
           // It should have changed its p->state before coming back.
           c->proc = 0;
